@@ -15,6 +15,18 @@ const submissionApiClient = submissionApi({
  */
 export default class ChallengeService {
 
+
+  public static async getMemberActiveChallenges(savedToken: string, username: string) {
+    try {
+      const url = constants.activeMemberActiveChallengeUrl.replace('{userHandle}', username);
+      const { data } = await axios.get(url,
+        { headers: { Authorization: `Bearer ${savedToken}` } });
+      return data;
+    } catch (err) {
+      throw new Error(constants.failedToLoadMemberActiveChallenges);
+    }
+  }
+
   /**
    * Get the list of current active challenges.
    * @param savedToken

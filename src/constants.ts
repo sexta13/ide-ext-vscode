@@ -29,6 +29,7 @@ export const challengeDetailsLoadFailedMessage = 'Failed to load details for the
 export const registeringMessage = 'Registering for challenge';
 export const registeredSuccessfullyMessage = 'Registered Successfully';
 export const registrationFailedMessage = 'Failed to register for the challenge';
+export const failedToLoadMemberActiveChallenges = 'Failed to load your active challenges';
 
 export const extensionConfigSectionName = 'TCVSCodeIDE';
 export const usernameConfig = 'credentials.username';
@@ -66,6 +67,10 @@ export const challengeRegistrationUrl = useDevelopEndpoint ?
   'https://api.topcoder-dev.com/v4/challenges/{challengeId}/register' :
   'https://api.topcoder.com/v4/challenges/{challengeId}/register';
 export const submitType = 'Contest Submission';
+
+export const activeMemberActiveChallengeUrl = useDevelopEndpoint ?
+'https://api.topcoder-dev.com/v4/members/{userHandle}/challenges/?filter=status%3DACTIVE&limit=50&offset=0' :
+'https://api.topcoder.com/v4/members/{userHandle}/challenges/?filter=status%3DACTIVE&limit=50&offset=0';
 
 export const webviewMessageActions = {
   DISPLAY_CHALLENGE_DETAILS: 'DISPLAY_CHALLENGE_DETAILS',

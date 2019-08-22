@@ -51,7 +51,32 @@
         "title": "Upload submission",
         "category": "Topcoder"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "topcoder",
+          "title": "TOPCODER",
+          "icon": "media/Logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "topcoder": [
+        {
+          "id": "topcoder-active-contests",
+          "name": "YOUR ACTIVE CONTESTS"
+        },
+        {
+          "id": "topcoder-active-submissions",
+          "name": "YOUR ACTIVE SUBMISSIONS"
+        },
+        {
+          "id": "topcoder-home",
+          "name": "HOME"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

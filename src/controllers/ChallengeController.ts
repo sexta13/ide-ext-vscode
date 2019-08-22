@@ -17,6 +17,7 @@ export default class ChallengeController {
    * Load all open challenges and display in webview
    */
   public async viewOpenChallenges() {
+    vscode.window.showQuickPick(['yes', 'no'], { ignoreFocusOut: true, placeHolder: 'cenas varias', canPickMany: false });
     if (!this.isUserLoggedIn()) {
       vscode.window.showErrorMessage(constants.notLoggedInMessage);
       return;
@@ -68,19 +69,12 @@ export default class ChallengeController {
     vscode.window.showInformationMessage(constants.challengeSubmittedMessage);
   }
 
-  /**
-   * Check if user has logged in.
-   */
-  private isUserLoggedIn(): boolean {
-    const token = this.context.globalState.get(constants.tokenStateKey);
-    return !!token;
-  }
 
   /**
    * Load challenge details for the given challenge id.
    * @param challengeId The challenge Id
    */
-  private async viewChallengeDetails(challengeId: string) {
+  public async viewChallengeDetails(challengeId: string) {
     if (!this.isUserLoggedIn()) {
       vscode.window.showErrorMessage(constants.notLoggedInMessage);
       return;
@@ -111,6 +105,14 @@ export default class ChallengeController {
   }
 
   /**
+   * Check if user has logged in.
+   */
+  private isUserLoggedIn(): boolean {
+    const token = this.context.globalState.get(constants.tokenStateKey);
+    return !!token;
+  }
+
+  /**
    * Returns a new webview panel.
    * @param title The title of the webview panel
    * @param allowScripts Defaults to false. Set true to enable javascript inside the webview.
@@ -137,10 +139,10 @@ export default class ChallengeController {
     switch (message.action) {
       case constants.webviewMessageActions.DISPLAY_CHALLENGE_DETAILS: {
         await this.viewChallengeDetails(message.data.challengeId);
-      }                                                               break;
+      } break;
       case constants.webviewMessageActions.REGISTER_FOR_CHALLENGE: {
         await this.registerUserForChallenge(message.data.challengeId);
-      }                                                            break;
+      } break;
     }
   }
 
