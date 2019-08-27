@@ -11,6 +11,7 @@ import * as git from 'isomorphic-git';
  * Controller for handling challenge commands.
  */
 export default class ChallengeController {
+
   private challengeListingsWebviewPanel: vscode.WebviewPanel | undefined = undefined;
   private challengeDetailsWebviewPanel: vscode.WebviewPanel | undefined = undefined;
   private challengeSubmissionWebviewPanel: vscode.WebviewPanel | undefined = undefined;
@@ -95,14 +96,16 @@ export default class ChallengeController {
       vscode.window.showInformationMessage(constants.loadSubmissionStarted);
       const token = await AuthService.updateTokenGlobalState(this.context);
       const result = await ChallengeService.getSubmissionDetails(challengeId, token);
-      console.log('result', result);
       reviews = await Promise.all(result.map(async (sub: any) => {
         const artifactsResult = await ChallengeService.getSubmissionArtifacts(sub.id, token);
         const artifacts = _.get(artifactsResult, 'artifacts', []);
-        console.log('artifacts', artifacts);
-        return { artifacts, id: sub.id, score: sub.review[0].score, created: sub.review[0].created };
+        return {
+          artifacts,
+          id: sub.id,
+          score: sub.review[0].score,
+          created: new Date(sub.review[0].created).toUTCString()
+        };
       }));
-      console.log('reviews', reviews);
     } catch (err) {
       vscode.window.showErrorMessage(constants.loadSubmissionFailed);
     }
@@ -113,7 +116,7 @@ export default class ChallengeController {
       this.setSubmissionsContent(reviews);
       vscode.window.showInformationMessage(constants.loadSubmissionSuccess);
     } catch (err) {
-      vscode.window.showErrorMessage(constants.challengeDetailsLoadFailedMessage);
+      vscode.window.showErrorMessage(constants.loadSubmissionFailed);
     }
   }
 
@@ -197,18 +200,46 @@ export default class ChallengeController {
         break;
       }
       case constants.webviewMessageActions.CLONE_STARTER_PACK: {
-        await this.showCloneStarterPack(message.data.filter);
+        await this.showCloneStarterPack(message.data.filter, message.data.challengeId);
+        break;
+      }
+      case constants.webviewMessageActions.DOWNLOAD_ARTIFACT: {
+        const { submissionId, artifactId } = message.data;
+        await this.downloadArtifact(submissionId, artifactId);
         break;
       }
     }
+  }
+
+  private async downloadArtifact(submissionId: string, artifactId: string) {
+    vscode.window.showInformationMessage(constants.artifactDownloadStart);
+    try {
+      const userToken = await AuthService.updateTokenGlobalState(this.context);
+
+      const data = await ChallengeService.downloadArtifact(submissionId, artifactId, userToken);
+
+      data.pipe(fs.createWriteStream(path.join(vscode.workspace.rootPath || '', this.getFilenameFromRequest(data))));
+      vscode.window.showInformationMessage(constants.artifactDownloadSuccess);
+
+    } catch (err) {
+      vscode.window.showInformationMessage(constants.artifactDownloadFailed);
+    }
+  }
+
+  private getFilenameFromRequest(data: any) {
+    const headerLine = data.headers['content-disposition'];
+    const startFileNameIndex = headerLine.indexOf('"') + 1;
+    const endFileNameIndex = headerLine.lastIndexOf('"');
+    return headerLine.substring(startFileNameIndex, endFileNameIndex);
   }
 
   /**
    * Show starter packs. This way a user can pick one, and clone a starter pack project
    * @param filteredTechs object containing the techs that exist in the challenge
    */
-  private async showCloneStarterPack(filteredTechs: any) {
+  private async showCloneStarterPack(filteredTechs: any, challengeId: string) {
     // get all the repos that exist in configuration
+    const workspacePath = path.join(vscode.workspace.rootPath || '');
     const repos = _.flatten(filteredTechs.map((f: any) => f.repos.map((repo: any) => repo)));
     const choice = await vscode.window.showQuickPick(
       repos.map((r: any) => r.title),
@@ -217,19 +248,43 @@ export default class ChallengeController {
         placeHolder: 'Choose a starter pack'
       }
     );
+    if (!choice) {
+      vscode.window.showWarningMessage(constants.noStarterPackDownloaded);
+      return;
+    }
     // get the url for the selected repo
     const selection = repos.find((t: any) => t.title === choice) as any;
     try {
+      // ensure that folder is empty and let the user decide if wants to clear or not the folder
+      if (fs.readdirSync(workspacePath).length > 0) {
+        const isEmptyChoice = await vscode.window.showQuickPick(
+          ['Yes', 'No'],
+          {
+            canPickMany: false,
+            placeHolder: 'Folder is not empty. If you continue, all files will be delete. Are you sure?'
+          }
+        );
+        if (isEmptyChoice === 'No' || isEmptyChoice === undefined) {
+          vscode.window.showWarningMessage(constants.noStarterPackDownloaded);
+          return;
+        }
+      }
+      // delete all files
+      fs.emptyDirSync(workspacePath);
       vscode.window.showInformationMessage(constants.cloningStarterPackStarted);
+
       git.plugins.set('fs', fs);
       // clone it to root
       await git.clone({
-        dir: vscode.workspace.rootPath || '',
+        dir: workspacePath,
         url: selection.url,
         singleBranch: true,
       });
       // removing the git folder, since no need to get attached to that repository
-      fs.removeSync(path.join(vscode.workspace.rootPath || '', '.git'));
+      fs.removeSync(path.join(workspacePath, '.git'));
+
+      // initialize the workspace with the challenge id
+      await this.initializeWorkspaceForChallenge(challengeId);
       vscode.window.showInformationMessage(constants.cloningStarterPackSuccess);
     } catch (err) {
       vscode.window.showErrorMessage(constants.errorCloningStarterPack);
@@ -277,6 +332,12 @@ export default class ChallengeController {
           this.challengeSubmissionWebviewPanel = undefined;
         },
         null,
+        this.context.subscriptions
+      );
+      // listen for messages from webview
+      this.challengeSubmissionWebviewPanel.webview.onDidReceiveMessage(
+        this.handleMessagesFromWebView,
+        undefined,
         this.context.subscriptions
       );
     }

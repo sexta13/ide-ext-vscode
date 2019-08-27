@@ -39,6 +39,10 @@ export const cloningStarterPackStarted = 'Cloning starter pack started';
 export const loadSubmissionFailed = 'Loading submission details failed';
 export const loadSubmissionStarted = 'Loading submission details started';
 export const loadSubmissionSuccess = 'Submission details loaded with success';
+export const artifactDownloadStart = 'Download artifact started';
+export const artifactDownloadFailed = 'Download artifact failed';
+export const artifactDownloadSuccess = 'Download artifact with success';
+export const noStarterPackDownloaded = 'No starter pack downloaded';
 
 export const extensionConfigSectionName = 'TCVSCodeIDE';
 export const usernameConfig = 'credentials.username';
@@ -96,5 +100,7 @@ export const webviewMessageActions = {
   REGISTER_FOR_CHALLENGE: 'REGISTER_FOR_CHALLENGE',
   REGISTERED_FOR_CHALLENGE: 'REGISTERED_FOR_CHALLENGE',
   INITIALIZE_WORKSPACE: 'INITIALIZE_WORKSPACE',
+  DOWNLOAD_ARTIFACT: 'DOWNLOAD_ARTIFACT',
+
   CLONE_STARTER_PACK: 'CLONE_STARTER_PACK'
 };

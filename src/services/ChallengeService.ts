@@ -56,12 +56,13 @@ export default class ChallengeService {
         <title>${constants.submissionDetailsPageTitle}</title>
         <style>
             td {
-              padding: 3px;
+              padding: 10px;
             }
             th {
               /* Invert background and foreground for table header*/
               background-color: var(--vscode-editor-foreground) !important;
               color: var(--vscode-editor-background) !important;
+              padding: 10px;
             }
         </style>
       </head>
@@ -75,27 +76,57 @@ export default class ChallengeService {
           ${this.generateHtmlTableFromReviews(reviews)}
         </table>
         ${this.generateArtifactsUnorderedList(reviews)}
+        <script>
+        // enable communication with the extension via messaging.
+        var vscode;
+
+        (function () {
+          vscode = acquireVsCodeApi();
+        }());
+
+        function downloadArtifact(submissionId, artifactId) {
+          if (submissionId && artifactId) {
+            vscode.postMessage({
+              action: '${constants.webviewMessageActions.DOWNLOAD_ARTIFACT}',
+              data: {
+                submissionId,
+                artifactId
+              }
+            });
+          }
+        }
+      </script>
       </body>
       </html>`;
   }
 
+  public static async downloadArtifact(submissionId: string, artifactId: string, token: string) {
+    const url = constants.downloadSubmissionUrl.replace('{submissionId}', submissionId)
+      .replace('{artifactId}', artifactId);
+    try {
+      const { data } = await axios.get(url,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'stream'
+        });
+      return data;
+    } catch (err) {
+      throw new Error(constants.artifactDownloadFailed);
+    }
+  }
+
   public static generateArtifactsUnorderedList(reviews: any) {
     const filtered = reviews.filter((review: any) => !_.isEmpty(review.artifacts))
-      .map((t: any) => {
-        console.log(t);
-        return { id: t.id, artifacts: t.artifacts };
-      });
+      .map((t: any) => ({ id: t.id, artifacts: t.artifacts }));
+
     if (!_.isEmpty(filtered)) {
-      console.log('>>>>>>>>>>>>>>>>filtered', filtered);
       return `<h2>Artifacts</h2>
       <ul>
-        ${_.flatten(filtered.map((f: any) => {
-        return f.artifacts.map((artifact: any) => {
-          const url = constants.downloadSubmissionUrl.replace('{submissionId}', f.id)
-            .replace('{artifactId}', artifact);
-          return `<li><a href="${url}">${artifact}</a></li>`;
-        }).join('');
-      }))}
+        ${_.flatten(filtered.map((f: any) =>
+        (f.artifacts.map((artifact: any) =>
+          (`<li><a href='#' onclick='downloadArtifact("${f.id}", "${artifact}")'>${artifact}</a></li>`)).join('')
+        )
+      ))}
       </ul>`;
     }
     return '';
@@ -287,11 +318,12 @@ export default class ChallengeService {
             /**
              *  Launches action to ask user if we wants to use a starter pack
              */
-            function cloneStarterPack(filter) {
+            function cloneStarterPack(filter, challengeId) {
               vscode.postMessage({
                 action: '${constants.webviewMessageActions.CLONE_STARTER_PACK}',
                 data: {
-                  filter
+                  filter,
+                  challengeId,
                 }
               });
             }
@@ -664,7 +696,7 @@ export default class ChallengeService {
 
     return filter.length > 0 ? `
     <button class="workspaceBtns" style="margin-top:10px"
-      onclick='cloneStarterPack(${JSON.stringify(filter)})'>
+      onclick='cloneStarterPack(${JSON.stringify(filter)}, ${challengeDetails.challengeId})'>
       Clone starter pack
     </button>` : '';
   }
