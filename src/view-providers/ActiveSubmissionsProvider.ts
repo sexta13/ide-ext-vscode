@@ -1,14 +1,16 @@
 import * as vscode from 'vscode';
 import { IListItem } from './interfaces';
+import ChallengeController from '../controllers/ChallengeController';
 
 export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListItem> {
 
     /**
-     * Register this provider with vscode
+     * Register this provider with vscode and set it up
+     * @param challengeController A ChallengeController instance
      */
-    public static Register() {
+    public static Register(challengeController: ChallengeController) {
         if (!this.provider) {
-            this.provider = new ActiveSubmissionsProvider();
+            this.provider = new ActiveSubmissionsProvider(challengeController);
         }
         vscode.window.createTreeView('user-active-submissions', {
             treeDataProvider: this.provider
@@ -16,8 +18,20 @@ export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListI
     }
 
     private static provider: ActiveSubmissionsProvider;
-    private constructor() {
+    public readonly onDidChangeTreeData: vscode.Event<IListItem | undefined>;
+    private onDidChangeTreeDataEmitter: vscode.EventEmitter<IListItem | undefined> =
+        new vscode.EventEmitter<IListItem | undefined>();
+    private constructor(private challengeController: ChallengeController) {
+        this.onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
+        vscode.commands.registerCommand('activeSubmissions.openChallengeWithActiveSubmission',
+            async (id) => {
+                await this.challengeController.loadUserSubmission(id); // errors are handled internally
+            });
+
+        vscode.commands.registerCommand('activeSubmissions.reload', async () => {
+            this.onDidChangeTreeDataEmitter.fire();
+        });
     }
 
     /**
@@ -26,7 +40,13 @@ export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListI
      */
     public getTreeItem(element: IListItem): vscode.TreeItem | Thenable<vscode.TreeItem> {
         return {
-            label: element.name
+            label: element.name,
+            id: element.id,
+            command: element.id === '' ? undefined : {
+                command: 'activeSubmissions.openChallengeWithActiveSubmission',
+                arguments: [element.id],
+                title: 'Open'
+            }
         };
     }
 
@@ -34,7 +54,11 @@ export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListI
      * Returns the child nodes to display for a given node
      * @param element the node whose children should be returned
      */
-    public getChildren(element?: IListItem | undefined): vscode.ProviderResult<IListItem[]> {
-        return null;
+    public async getChildren(element?: IListItem | undefined): Promise<IListItem[]> {
+        console.log('element', element);
+        if (element === undefined) {
+            return await this.challengeController.loadActiveSubmissions();
+        }
+        return []; // since we don't have nested elements
     }
 }

@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import * as _ from 'lodash';
 import * as constants from '../constants';
+import * as fs from 'fs-extra';
+import * as path from 'path';
 import ChallengeService from '../services/ChallengeService';
 import AuthService from '../services/AuthService';
+import * as git from 'isomorphic-git';
 
 /**
  * Controller for handling challenge commands.
@@ -10,6 +13,7 @@ import AuthService from '../services/AuthService';
 export default class ChallengeController {
   private challengeListingsWebviewPanel: vscode.WebviewPanel | undefined = undefined;
   private challengeDetailsWebviewPanel: vscode.WebviewPanel | undefined = undefined;
+  private challengeSubmissionWebviewPanel: vscode.WebviewPanel | undefined = undefined;
 
   constructor(private context: vscode.ExtensionContext) { }
 
@@ -74,6 +78,43 @@ export default class ChallengeController {
   public async loadChallengesOfLoggedInUser() {// errors are handled by the caller
     const token = await AuthService.updateTokenGlobalState(this.context);
     return await ChallengeService.getActiveChallengesOfUser(token);
+  }
+
+  /**
+   * Loads the active submissions of the currently logged in user.
+   */
+  public async loadActiveSubmissions() {
+    const challenges = await this.loadChallengesOfLoggedInUser();
+    return challenges.filter((t: any) => t.userDetails.hasUserSubmittedForReview)
+      .map((ch: any) => ({ id: ch.id, name: ch.name }));
+  }
+
+  public async loadUserSubmission(challengeId: string) {
+    let reviews;
+    try {
+      vscode.window.showInformationMessage(constants.loadSubmissionStarted);
+      const token = await AuthService.updateTokenGlobalState(this.context);
+      const result = await ChallengeService.getSubmissionDetails(challengeId, token);
+      console.log('result', result);
+      reviews = await Promise.all(result.map(async (sub: any) => {
+        const artifactsResult = await ChallengeService.getSubmissionArtifacts(sub.id, token);
+        const artifacts = _.get(artifactsResult, 'artifacts', []);
+        console.log('artifacts', artifacts);
+        return { artifacts, id: sub.id, score: sub.review[0].score, created: sub.review[0].created };
+      }));
+      console.log('reviews', reviews);
+    } catch (err) {
+      vscode.window.showErrorMessage(constants.loadSubmissionFailed);
+    }
+
+    try { // handle any other errors while generating the html
+      // ensure webview is available and then set content
+      this.makeChallengeUserSubmissionDetailsWebViewAvailable();
+      this.setSubmissionsContent(reviews);
+      vscode.window.showInformationMessage(constants.loadSubmissionSuccess);
+    } catch (err) {
+      vscode.window.showErrorMessage(constants.challengeDetailsLoadFailedMessage);
+    }
   }
 
   /**
@@ -145,13 +186,53 @@ export default class ChallengeController {
     switch (message.action) {
       case constants.webviewMessageActions.DISPLAY_CHALLENGE_DETAILS: {
         await this.viewChallengeDetails(message.data.challengeId);
-    }                                                                 break;
+        break;
+      }
       case constants.webviewMessageActions.REGISTER_FOR_CHALLENGE: {
         await this.registerUserForChallenge(message.data.challengeId);
-      }                                                            break;
+        break;
+      }
       case constants.webviewMessageActions.INITIALIZE_WORKSPACE: {
         await this.initializeWorkspaceForChallenge(message.data.challengeId);
-      }                                                          break;
+        break;
+      }
+      case constants.webviewMessageActions.CLONE_STARTER_PACK: {
+        await this.showCloneStarterPack(message.data.filter);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Show starter packs. This way a user can pick one, and clone a starter pack project
+   * @param filteredTechs object containing the techs that exist in the challenge
+   */
+  private async showCloneStarterPack(filteredTechs: any) {
+    // get all the repos that exist in configuration
+    const repos = _.flatten(filteredTechs.map((f: any) => f.repos.map((repo: any) => repo)));
+    const choice = await vscode.window.showQuickPick(
+      repos.map((r: any) => r.title),
+      {
+        canPickMany: false,
+        placeHolder: 'Choose a starter pack'
+      }
+    );
+    // get the url for the selected repo
+    const selection = repos.find((t: any) => t.title === choice) as any;
+    try {
+      vscode.window.showInformationMessage(constants.cloningStarterPackStarted);
+      git.plugins.set('fs', fs);
+      // clone it to root
+      await git.clone({
+        dir: vscode.workspace.rootPath || '',
+        url: selection.url,
+        singleBranch: true,
+      });
+      // removing the git folder, since no need to get attached to that repository
+      fs.removeSync(path.join(vscode.workspace.rootPath || '', '.git'));
+      vscode.window.showInformationMessage(constants.cloningStarterPackSuccess);
+    } catch (err) {
+      vscode.window.showErrorMessage(constants.errorCloningStarterPack);
     }
   }
 
@@ -177,6 +258,25 @@ export default class ChallengeController {
       this.challengeListingsWebviewPanel.webview.onDidReceiveMessage(
         this.handleMessagesFromWebView,
         undefined,
+        this.context.subscriptions
+      );
+    }
+  }
+  /**
+   * Ensure that a valid and undisposed webview is available to load submission details
+   */
+  private makeChallengeUserSubmissionDetailsWebViewAvailable() {
+    const columnToShowIn = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
+    if (this.challengeSubmissionWebviewPanel) {
+      this.challengeSubmissionWebviewPanel.reveal(columnToShowIn);
+    } else {
+      this.challengeSubmissionWebviewPanel = this.getNewWebViewPanel(constants.submissionDetailsPageTitle, true);
+      // handle dispose of webview
+      this.challengeSubmissionWebviewPanel.onDidDispose(
+        () => {
+          this.challengeSubmissionWebviewPanel = undefined;
+        },
+        null,
         this.context.subscriptions
       );
     }
@@ -215,6 +315,16 @@ export default class ChallengeController {
   private setChallengeListingsContent(challenges: any) {
     if (this.challengeListingsWebviewPanel) {
       this.challengeListingsWebviewPanel.webview.html = ChallengeService.generateHtmlFromChallenges(challenges);
+    }
+  }
+
+  /**
+   * Set the content of the webview using the available submssion information
+   * @param challenges The submission details
+   */
+  private setSubmissionsContent(reviews: any) {
+    if (this.challengeSubmissionWebviewPanel) {
+      this.challengeSubmissionWebviewPanel.webview.html = ChallengeService.generateReviewArtifactsHtml(reviews);
     }
   }
 

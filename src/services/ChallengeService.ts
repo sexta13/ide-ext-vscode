@@ -6,6 +6,7 @@ import * as path from 'path';
 import ignore, { Ignore } from 'ignore';
 import * as jwt from 'jsonwebtoken';
 import * as archiver from 'archiver';
+import packConfig from '../config/packs';
 import submissionApi = require('@topcoder-platform/topcoder-submission-api-wrapper');
 const submissionApiClient = submissionApi({
   SUBMISSION_API_URL: constants.uploadSubmmissionUrl
@@ -14,6 +15,110 @@ const submissionApiClient = submissionApi({
  * Interacts with challenges APIs
  */
 export default class ChallengeService {
+
+  public static async getSubmissionDetails(challengeId: string, token: string) {
+    const decodedToken: any = jwt.decode(token);
+    const url = constants.memberSubmissionUrl
+      .replace('{challengeId}', challengeId)
+      .replace('{memberId}', decodedToken.userId);
+
+    try {
+      const { data } = await axios.get(url,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      return data;
+    } catch (err) {
+      throw new Error(constants.loadSubmissionFailed);
+    }
+  }
+
+  public static async getSubmissionArtifacts(submissionId: string, token: string) {
+    const url = constants.submissionArtifactsUrl.replace('{submissionId}', submissionId);
+
+    try {
+      const { data } = await axios.get(url,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      return data;
+    } catch (err) {
+      throw new Error(constants.loadSubmissionFailed);
+    }
+  }
+
+  public static generateReviewArtifactsHtml(reviews: any) {
+    return `<!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${constants.submissionDetailsPageTitle}</title>
+        <style>
+            td {
+              padding: 3px;
+            }
+            th {
+              /* Invert background and foreground for table header*/
+              background-color: var(--vscode-editor-foreground) !important;
+              color: var(--vscode-editor-background) !important;
+            }
+        </style>
+      </head>
+      <body>
+      <h2>Reviews</h2>
+        <table border="1" style="margin-bottom: 40px">
+          <tr>
+            <th>Score</th>
+            <th>Created</th>
+          </tr>
+          ${this.generateHtmlTableFromReviews(reviews)}
+        </table>
+        ${this.generateArtifactsUnorderedList(reviews)}
+      </body>
+      </html>`;
+  }
+
+  public static generateArtifactsUnorderedList(reviews: any) {
+    const filtered = reviews.filter((review: any) => !_.isEmpty(review.artifacts))
+      .map((t: any) => {
+        console.log(t);
+        return { id: t.id, artifacts: t.artifacts };
+      });
+    if (!_.isEmpty(filtered)) {
+      console.log('>>>>>>>>>>>>>>>>filtered', filtered);
+      return `<h2>Artifacts</h2>
+      <ul>
+        ${_.flatten(filtered.map((f: any) => {
+        return f.artifacts.map((artifact: any) => {
+          const url = constants.downloadSubmissionUrl.replace('{submissionId}', f.id)
+            .replace('{artifactId}', artifact);
+          return `<li><a href="${url}">${artifact}</a></li>`;
+        }).join('');
+      }))}
+      </ul>`;
+    }
+    return '';
+  }
+
+  public static generateHtmlUl(reviews: any) {
+    return reviews
+      .map((review: any) => {
+        return `${review}`;
+      })
+      .join('');
+  }
+
+  public static generateHtmlTableFromReviews(reviews: any) {
+    return reviews
+      .map((review: any) => {
+        return `<tr>
+                  <td>${review.score}</td>
+                  <td>${review.created}</td>
+                </tr>`;
+      })
+      .join('');
+  }
 
   /**
    * Get the list of current active challenges.
@@ -134,10 +239,10 @@ export default class ChallengeService {
               background-color: var(--vscode-editor-background) !important;
               color: var(--vscode-editor-foreground) !important;
             }
-            #initWorkspaceButton {
+            .workspaceBtns {
               display: none;
             }
-            #initWorkspaceButton.visible {
+            .workspaceBtns.visible {
               display: block;
             }
           </style>
@@ -180,10 +285,26 @@ export default class ChallengeService {
             }
 
             /**
-             * Show the init workspace button that is hidden by default
+             *  Launches action to ask user if we wants to use a starter pack
              */
-            function showInitWorkspaceButton() {
-              document.getElementById('initWorkspaceButton').classList.add('visible');
+            function cloneStarterPack(filter) {
+              vscode.postMessage({
+                action: '${constants.webviewMessageActions.CLONE_STARTER_PACK}',
+                data: {
+                  filter
+                }
+              });
+            }
+
+            /**
+             * Show the workspace buttons that are hidden by default
+             */
+            function showWorkspaceButtons() {
+              var buttons = document.getElementsByClassName('workspaceBtns');
+              Array.from(buttons).forEach(
+                function(navDom) {
+                  navDom.classList.add('visible')
+                });
             }
 
             // Handle message from extension to this webview.
@@ -192,20 +313,21 @@ export default class ChallengeService {
                 switch (message.command) {
                     case '${constants.webviewMessageActions.REGISTERED_FOR_CHALLENGE}':{
                       document.getElementById('registerButton').remove();
-                      showInitWorkspaceButton();
+                      showWorkspaceButtons();
                     } break;
                 }
             });
             // wait for window to load completely
             window.addEventListener('load', () => {
                 if(!document.getElementById('registerButton')) {
-                  showInitWorkspaceButton();
+                  showWorkspaceButtons();
                 }
             });
           </script>
           <h1>${challengeDetails.challengeTitle}</h1>
           ${this.generateRegisterButtonHTML(challengeDetails, userToken)}
           ${this.generateInitWorkspaceButtonHtml(challengeDetails)}
+          ${this.generateCloneStarterPackButtonHtml(challengeDetails)}
           <h2>Prizes</h2>
           <div>${this.generateHtmlFromChallengePrizes(challengeDetails.prizes)}</div>
           <h2>Meta</h2>
@@ -527,8 +649,23 @@ export default class ChallengeService {
    */
   private static generateInitWorkspaceButtonHtml(challengeDetails: any) {
     return `
-    <button id="initWorkspaceButton" onclick='initializeWorkspace(${challengeDetails.challengeId})'>
+    <button class="workspaceBtns" onclick='initializeWorkspace(${challengeDetails.challengeId})'>
       Initialize Workspace
     </button>`;
+  }
+  /**
+   * Returns the html to display the button that will ask the user to initialize the current
+   * workspace with a specific starter pack
+   * @param challengeDetails The challenge details
+   */
+  private static generateCloneStarterPackButtonHtml(challengeDetails: any) {
+    const filter = packConfig.filter((x: any) =>
+      challengeDetails.technologies.some((y: string) => x.name.toLowerCase() === y.toLowerCase()));
+
+    return filter.length > 0 ? `
+    <button class="workspaceBtns" style="margin-top:10px"
+      onclick='cloneStarterPack(${JSON.stringify(filter)})'>
+      Clone starter pack
+    </button>` : '';
   }
 }
