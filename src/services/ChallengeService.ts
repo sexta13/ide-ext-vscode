@@ -16,6 +16,11 @@ const submissionApiClient = submissionApi({
  */
 export default class ChallengeService {
 
+  /**
+   * Gets the details of a submission
+   * @param challengeId challenge identifier
+   * @param token user token
+   */
   public static async getSubmissionDetails(challengeId: string, token: string) {
     const decodedToken: any = jwt.decode(token);
     const url = constants.memberSubmissionUrl
@@ -33,6 +38,11 @@ export default class ChallengeService {
     }
   }
 
+  /**
+   * Get the artifacts in a submission
+   * @param submissionId submission identifier
+   * @param token user token
+   */
   public static async getSubmissionArtifacts(submissionId: string, token: string) {
     const url = constants.submissionArtifactsUrl.replace('{submissionId}', submissionId);
 
@@ -47,6 +57,11 @@ export default class ChallengeService {
     }
   }
 
+  /**
+   * Generate html page content from reviews and artifacts
+   * @param reviews the reviews with artifacts
+   * @return the html page content
+   */
   public static generateReviewArtifactsHtml(reviews: any) {
     return `<!doctype html>
       <html lang="en">
@@ -71,7 +86,7 @@ export default class ChallengeService {
         <table border="1" style="margin-bottom: 40px">
           <tr>
             <th>Score</th>
-            <th>Created</th>
+            <th>Created at</th>
           </tr>
           ${this.generateHtmlTableFromReviews(reviews)}
         </table>
@@ -100,8 +115,15 @@ export default class ChallengeService {
       </html>`;
   }
 
+  /**
+   * Gets the stream to download to disk an artifact
+   * @param submissionId Submission identifier
+   * @param artifactId Artifact identifier
+   * @param token User token
+   */
   public static async downloadArtifact(submissionId: string, artifactId: string, token: string) {
-    const url = constants.downloadSubmissionUrl.replace('{submissionId}', submissionId)
+    const url = constants.downloadSubmissionUrl
+      .replace('{submissionId}', submissionId)
       .replace('{artifactId}', artifactId);
     try {
       const { data } = await axios.get(url,
@@ -113,42 +135,6 @@ export default class ChallengeService {
     } catch (err) {
       throw new Error(constants.artifactDownloadFailed);
     }
-  }
-
-  public static generateArtifactsUnorderedList(reviews: any) {
-    const filtered = reviews.filter((review: any) => !_.isEmpty(review.artifacts))
-      .map((t: any) => ({ id: t.id, artifacts: t.artifacts }));
-
-    if (!_.isEmpty(filtered)) {
-      return `<h2>Artifacts</h2>
-      <ul>
-        ${_.flatten(filtered.map((f: any) =>
-        (f.artifacts.map((artifact: any) =>
-          (`<li><a href='#' onclick='downloadArtifact("${f.id}", "${artifact}")'>${artifact}</a></li>`)).join('')
-        )
-      ))}
-      </ul>`;
-    }
-    return '';
-  }
-
-  public static generateHtmlUl(reviews: any) {
-    return reviews
-      .map((review: any) => {
-        return `${review}`;
-      })
-      .join('');
-  }
-
-  public static generateHtmlTableFromReviews(reviews: any) {
-    return reviews
-      .map((review: any) => {
-        return `<tr>
-                  <td>${review.score}</td>
-                  <td>${review.created}</td>
-                </tr>`;
-      })
-      .join('');
   }
 
   /**
@@ -671,8 +657,17 @@ export default class ChallengeService {
     // add register button to DOM only if this user has not already registered
     const registrants: any[] = _.get(challengeDetails, 'registrants', []);
     const decodedToken: any = jwt.decode(userToken);
-    const registerEnabled = registrants.find((profile) => profile.handle === decodedToken.handle) === undefined;
+    const registerEnabled = registrants.find((profile) => profile.handle === decodedToken.handle) === undefined
+      && this.isApplyPhase(challengeDetails);
     return registerEnabled ? buttonHtml : '';
+  }
+
+  /**
+   * Checks if a challenge can have action to register
+   * @param challengeDetails The challenge details
+   */
+  private static isApplyPhase(challengeDetails: any) {
+    return challengeDetails.currentPhaseName === 'Submission' || challengeDetails.currentPhaseName === 'Registration';
   }
 
   /**
@@ -680,11 +675,12 @@ export default class ChallengeService {
    * @param challengeDetails The challenge details
    */
   private static generateInitWorkspaceButtonHtml(challengeDetails: any) {
-    return `
+    return this.isApplyPhase(challengeDetails) ? `
     <button class="workspaceBtns" onclick='initializeWorkspace(${challengeDetails.challengeId})'>
       Initialize Workspace
-    </button>`;
+    </button>` : '';
   }
+
   /**
    * Returns the html to display the button that will ask the user to initialize the current
    * workspace with a specific starter pack
@@ -694,10 +690,47 @@ export default class ChallengeService {
     const filter = packConfig.filter((x: any) =>
       challengeDetails.technologies.some((y: string) => x.name.toLowerCase() === y.toLowerCase()));
 
-    return filter.length > 0 ? `
+    return filter.length > 0 && this.isApplyPhase(challengeDetails) ? `
     <button class="workspaceBtns" style="margin-top:10px"
       onclick='cloneStarterPack(${JSON.stringify(filter)}, ${challengeDetails.challengeId})'>
       Clone starter pack
     </button>` : '';
   }
+
+  /**
+   * Generate the html to show artifacts in an unordered list
+   * @param reviews reviews with artifacts
+   */
+  private static generateArtifactsUnorderedList(reviews: any) {
+    // get all the reviews which contains artifacts
+    const filtered = reviews.filter((review: any) => !_.isEmpty(review.artifacts))
+      .map((t: any) => ({ id: t.id, artifacts: t.artifacts }));
+
+    // just show artifacts section in case they exist
+    if (!_.isEmpty(filtered)) {
+      return `<h2>Artifacts</h2>
+      <ul>
+        ${_.flatten(filtered.map((f: any) =>
+        (f.artifacts.map((artifact: any) =>
+          (`<li style="margin-top:10px"><a href='#' onclick='downloadArtifact("${f.id}", "${artifact}")'>${artifact}</a></li>`)).join('')
+        )
+      ))}
+      </ul>`;
+    }
+    return '';
+  }
+
+  /**
+   * Generate reviews table
+   * @param reviews reviews with artifacts
+   */
+  private static generateHtmlTableFromReviews(reviews: any) {
+    return reviews.map((review: any) => {
+      return `<tr>
+                  <td>${review.score}</td>
+                  <td>${review.created}</td>
+                </tr>`;
+    }).join('');
+  }
+
 }

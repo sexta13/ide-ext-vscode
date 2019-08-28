@@ -1,3 +1,8 @@
+/**
+ * Structure to add more starter packs.
+ * name - must match a technology in technologies field of challenge details
+ * repos - the different repos (title and url) for a technology.
+ */
 export default [
     {
         name: 'Node.js',

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { IListItem } from './interfaces';
+import * as _ from 'lodash';
 import ChallengeController from '../controllers/ChallengeController';
 
 export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListItem> {
@@ -42,6 +43,7 @@ export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListI
         return {
             label: element.name,
             id: element.id,
+            description: element.description,
             command: element.id === '' ? undefined : {
                 command: 'activeSubmissions.openChallengeWithActiveSubmission',
                 arguments: [element.id],
@@ -55,9 +57,12 @@ export class ActiveSubmissionsProvider implements vscode.TreeDataProvider<IListI
      * @param element the node whose children should be returned
      */
     public async getChildren(element?: IListItem | undefined): Promise<IListItem[]> {
-        console.log('element', element);
         if (element === undefined) {
-            return await this.challengeController.loadActiveSubmissions();
+            const activeSubmissions = await this.challengeController.loadActiveSubmissions();
+            if (_.isEmpty(activeSubmissions)) {
+                return [{ name: '', description: 'You have no active submissions', id: '' }];
+            }
+            return activeSubmissions;
         }
         return []; // since we don't have nested elements
     }

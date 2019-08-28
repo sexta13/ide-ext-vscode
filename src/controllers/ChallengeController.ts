@@ -42,8 +42,10 @@ export default class ChallengeController {
 
     try {// handle any other errors while generating the html or preparing the webview
       // ensure webview is available, then set content into it
-      this.makeChallengeListingsWebViewAvailable();
-      this.setChallengeListingsContent(challenges);
+      this.challengeListingsWebviewPanel = this.makeWebViewAvailable(constants.challengesPageTitle);
+      // Set the content of the webview using the available challenges information
+      this.setWebviewContent(this.challengeListingsWebviewPanel,
+        ChallengeService.generateHtmlFromChallenges(challenges));
       vscode.window.showInformationMessage(constants.openChallengesLoadedMessage);
     } catch (err) {
       vscode.window.showErrorMessage(constants.loadOpenChallengesFailedMessage);
@@ -90,12 +92,18 @@ export default class ChallengeController {
       .map((ch: any) => ({ id: ch.id, name: ch.name }));
   }
 
+  /**
+   * Load user submission details - Reviews (with score and creation date)
+   * and a list of artifacts (if exists)
+   * @param challengeId challenge identifier
+   */
   public async loadUserSubmission(challengeId: string) {
     let reviews;
     try {
       vscode.window.showInformationMessage(constants.loadSubmissionStarted);
       const token = await AuthService.updateTokenGlobalState(this.context);
       const result = await ChallengeService.getSubmissionDetails(challengeId, token);
+      // need to get all artifacts for each review in a submission.
       reviews = await Promise.all(result.map(async (sub: any) => {
         const artifactsResult = await ChallengeService.getSubmissionArtifacts(sub.id, token);
         const artifacts = _.get(artifactsResult, 'artifacts', []);
@@ -112,8 +120,12 @@ export default class ChallengeController {
 
     try { // handle any other errors while generating the html
       // ensure webview is available and then set content
-      this.makeChallengeUserSubmissionDetailsWebViewAvailable();
-      this.setSubmissionsContent(reviews);
+      this.challengeSubmissionWebviewPanel = this.makeWebViewAvailable(constants.submissionDetailsPageTitle);
+
+      // Set the content of the webview using the available submssion information
+      this.setWebviewContent(this.challengeSubmissionWebviewPanel,
+        ChallengeService.generateReviewArtifactsHtml(reviews));
+
       vscode.window.showInformationMessage(constants.loadSubmissionSuccess);
     } catch (err) {
       vscode.window.showErrorMessage(constants.loadSubmissionFailed);
@@ -146,8 +158,12 @@ export default class ChallengeController {
 
     try { // handle any other errors while generating the html
       // ensure webview is available and then set content
-      this.makeChallengeDetailsWebViewAvailable();
-      this.setChallengeDetailsWebViewContent(challengeDetails, token);
+      this.challengeDetailsWebviewPanel = this.makeWebViewAvailable(constants.challengeDetailsPageTitle);
+
+      // Set the content of the webview using the available details of a challenge
+      this.setWebviewContent(this.challengeDetailsWebviewPanel,
+        ChallengeService.generateHtmlFromChallengeDetails(challengeDetails, token));
+
       vscode.window.showInformationMessage(constants.challengeDetailsLoadedMessage);
     } catch (err) {
       vscode.window.showErrorMessage(constants.challengeDetailsLoadFailedMessage);
@@ -211,6 +227,11 @@ export default class ChallengeController {
     }
   }
 
+  /**
+   * Allows the logged in user to download an artifact of a specific submission
+   * @param submissionId submission identifier
+   * @param artifactId artifact identifier
+   */
   private async downloadArtifact(submissionId: string, artifactId: string) {
     vscode.window.showInformationMessage(constants.artifactDownloadStart);
     try {
@@ -218,6 +239,7 @@ export default class ChallengeController {
 
       const data = await ChallengeService.downloadArtifact(submissionId, artifactId, userToken);
 
+      // file is saved at root path
       data.pipe(fs.createWriteStream(path.join(vscode.workspace.rootPath || '', this.getFilenameFromRequest(data))));
       vscode.window.showInformationMessage(constants.artifactDownloadSuccess);
 
@@ -225,7 +247,10 @@ export default class ChallengeController {
       vscode.window.showInformationMessage(constants.artifactDownloadFailed);
     }
   }
-
+  /**
+   * Gets a filename from a stream response
+   * @param data response from an axios call for a response type of "stream"
+   */
   private getFilenameFromRequest(data: any) {
     const headerLine = data.headers['content-disposition'];
     const startFileNameIndex = headerLine.indexOf('"') + 1;
@@ -248,6 +273,7 @@ export default class ChallengeController {
         placeHolder: 'Choose a starter pack'
       }
     );
+    // if the user don't make a selection, warn him that nothing was downloaded.
     if (!choice) {
       vscode.window.showWarningMessage(constants.noStarterPackDownloaded);
       return;
@@ -264,7 +290,8 @@ export default class ChallengeController {
             placeHolder: 'Folder is not empty. If you continue, all files will be delete. Are you sure?'
           }
         );
-        if (isEmptyChoice === 'No' || isEmptyChoice === undefined) {
+        // in case user don't want to clear folder
+        if (isEmptyChoice !== 'Yes') {
           vscode.window.showWarningMessage(constants.noStarterPackDownloaded);
           return;
         }
@@ -292,111 +319,41 @@ export default class ChallengeController {
   }
 
   /**
-   * Ensure that a valid and undisposed webview is available to load challenge listings
+   * Ensure that a valid and undisposed webview is available to load
    */
-  private makeChallengeListingsWebViewAvailable() {
+  private makeWebViewAvailable(title: string) {
+    let webviewPanel: vscode.WebviewPanel | undefined;
     const columnToShowIn = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
-    if (this.challengeListingsWebviewPanel) {
-      this.challengeListingsWebviewPanel.reveal(columnToShowIn);
+    if (webviewPanel) {
+      webviewPanel.reveal(columnToShowIn);
     } else {
-      this.challengeListingsWebviewPanel = this.getNewWebViewPanel(constants.challengesPageTitle, true);
+      webviewPanel = this.getNewWebViewPanel(title, true);
       // handle dispose of webview
-      this.challengeListingsWebviewPanel.onDidDispose(
+      webviewPanel.onDidDispose(
         () => {
-          this.challengeListingsWebviewPanel = undefined;
+          webviewPanel = undefined;
         },
         null,
         this.context.subscriptions
       );
 
       // listen for messages from webview
-      this.challengeListingsWebviewPanel.webview.onDidReceiveMessage(
+      webviewPanel.webview.onDidReceiveMessage(
         this.handleMessagesFromWebView,
         undefined,
         this.context.subscriptions
       );
     }
+    return webviewPanel;
   }
   /**
-   * Ensure that a valid and undisposed webview is available to load submission details
+   * Set the content of the webview using the available information
+   * @param webviewPanel webviewPanel to set the html content
+   * @param content  content to show (challenges list, detail or submissions)
    */
-  private makeChallengeUserSubmissionDetailsWebViewAvailable() {
-    const columnToShowIn = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
-    if (this.challengeSubmissionWebviewPanel) {
-      this.challengeSubmissionWebviewPanel.reveal(columnToShowIn);
-    } else {
-      this.challengeSubmissionWebviewPanel = this.getNewWebViewPanel(constants.submissionDetailsPageTitle, true);
-      // handle dispose of webview
-      this.challengeSubmissionWebviewPanel.onDidDispose(
-        () => {
-          this.challengeSubmissionWebviewPanel = undefined;
-        },
-        null,
-        this.context.subscriptions
-      );
-      // listen for messages from webview
-      this.challengeSubmissionWebviewPanel.webview.onDidReceiveMessage(
-        this.handleMessagesFromWebView,
-        undefined,
-        this.context.subscriptions
-      );
-    }
-  }
-
-  /**
-   * Make sure that a valid and undisposed webview is available to show challenge details
-   */
-  private makeChallengeDetailsWebViewAvailable() {
-    const columnToShowIn = vscode.window.activeTextEditor ? vscode.window.activeTextEditor.viewColumn : undefined;
-    if (this.challengeDetailsWebviewPanel) {
-      this.challengeDetailsWebviewPanel.reveal(columnToShowIn);
-    } else {
-      this.challengeDetailsWebviewPanel = this.getNewWebViewPanel(constants.challengeDetailsPageTitle, true);
-      // handle webview dispose
-      this.challengeDetailsWebviewPanel.onDidDispose(
-        () => {
-          this.challengeDetailsWebviewPanel = undefined;
-        },
-        null,
-        this.context.subscriptions
-      );
-      // listen for messages from webview
-      this.challengeDetailsWebviewPanel.webview.onDidReceiveMessage(
-        this.handleMessagesFromWebView,
-        undefined,
-        this.context.subscriptions
-      );
-    }
-  }
-
-  /**
-   * Set the content of the webview using the available challenges information
-   * @param challenges The challenges collection
-   */
-  private setChallengeListingsContent(challenges: any) {
-    if (this.challengeListingsWebviewPanel) {
-      this.challengeListingsWebviewPanel.webview.html = ChallengeService.generateHtmlFromChallenges(challenges);
-    }
-  }
-
-  /**
-   * Set the content of the webview using the available submssion information
-   * @param challenges The submission details
-   */
-  private setSubmissionsContent(reviews: any) {
-    if (this.challengeSubmissionWebviewPanel) {
-      this.challengeSubmissionWebviewPanel.webview.html = ChallengeService.generateReviewArtifactsHtml(reviews);
-    }
-  }
-
-  /**
-   * Set the content of the webview using the available details of a challenge
-   * @param challengeDetails The details of a challenge
-   */
-  private setChallengeDetailsWebViewContent(challengeDetails: any, token: string) {
-    if (this.challengeDetailsWebviewPanel && challengeDetails) {
-      this.challengeDetailsWebviewPanel
-        .webview.html = ChallengeService.generateHtmlFromChallengeDetails(challengeDetails, token);
+  private setWebviewContent(webviewPanel: vscode.WebviewPanel | undefined, content: any) {
+    if (webviewPanel) {
+      webviewPanel.webview.html = content;
     }
   }
 
